@@ -166,7 +166,7 @@ def main():
     ap.add_argument('--limit-devices',    type=int, default=None)
     ap.add_argument('--limit-per-router', type=int, default=None)
     ap.add_argument('--cache-max-age', type=float, default=3600,
-                    help='max cache age in seconds (default 3600)')
+                    help='max cache age in seconds (default 3600, 0=no expiry)')
     ap.add_argument('--no-cache', action='store_true',
                     help='ignore cache and force a fresh scan')
     args = ap.parse_args()
@@ -206,7 +206,7 @@ def main():
     if cached_meta is not None:
         age = time.time() - cached_meta.get('ts', 0)
         cached_ids = set(cached_records.keys())
-        if age > args.cache_max_age:
+        if args.cache_max_age > 0 and age > args.cache_max_age:
             print(f'[cache] stale ({age/60:.0f}m old > {args.cache_max_age/60:.0f}m max), '
                   f'doing fresh scan', file=sys.stderr)
         elif discovered_ids <= cached_ids:
