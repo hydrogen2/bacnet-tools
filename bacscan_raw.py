@@ -108,6 +108,29 @@ def enumerate_device(reader, dev, want_names, rate):
             'object_count': count, 'objects': objs,
             'elapsed': round(time.time()-started, 2)}
 
+def load_cache(path):
+    """Load cache from JSONL file. Returns (meta_dict, {device_instance: record})."""
+    try:
+        with open(path) as fh:
+            first = fh.readline().strip()
+            if not first:
+                return None, {}
+            meta = json.loads(first)
+            if not meta.get('_meta'):
+                return None, {}
+            records = {}
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                if rec.get('_meta'):
+                    continue
+                records[rec['device']] = rec
+            return meta, records
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return None, {}
+
 def worker(ip, devs_for_ip, args, src_ip, write_lock, out_fh, progress):
     reader = Reader(src_ip, args.src_port, args.timeout)
     try:
@@ -142,6 +165,10 @@ def main():
     ap.add_argument('--out',        default='/tmp/bac_autosearch.jsonl')
     ap.add_argument('--limit-devices',    type=int, default=None)
     ap.add_argument('--limit-per-router', type=int, default=None)
+    ap.add_argument('--cache-max-age', type=float, default=3600,
+                    help='max cache age in seconds (default 3600)')
+    ap.add_argument('--no-cache', action='store_true',
+                    help='ignore cache and force a fresh scan')
     args = ap.parse_args()
 
     src_ip, bcast = resolve_src_and_bcast(args.src_ip, args.bcast)
@@ -166,13 +193,64 @@ def main():
                 new[ip].append(d); keep -= 1
             if keep <= 0: break
         by_ip = new
+
+    discovered_ids = set()
+    for devs in by_ip.values():
+        for d in devs:
+            discovered_ids.add(d['device_instance'])
+
+    # --- cache logic ---
+    cached_meta, cached_records = (None, {}) if args.no_cache else load_cache(args.out)
+    cache_mode = 'full'  # full | resume | hit
+
+    if cached_meta is not None:
+        age = time.time() - cached_meta.get('ts', 0)
+        cached_ids = set(cached_records.keys())
+        if age > args.cache_max_age:
+            print(f'[cache] stale ({age/60:.0f}m old > {args.cache_max_age/60:.0f}m max), '
+                  f'doing fresh scan', file=sys.stderr)
+        elif discovered_ids <= cached_ids:
+            cache_mode = 'hit'
+            print(f'[cache] complete hit — {len(cached_records)} devices, '
+                  f'{age/60:.1f}m old', file=sys.stderr)
+        else:
+            cache_mode = 'resume'
+            missing = discovered_ids - cached_ids
+            print(f'[cache] partial — {len(cached_ids)} cached, '
+                  f'{len(missing)} remaining', file=sys.stderr)
+
+    if cache_mode == 'hit':
+        # print cached results to stdout and exit
+        for inst in sorted(discovered_ids):
+            print(json.dumps(cached_records[inst]))
+        print(f'\n[done] {len(cached_records)} devices from cache  -> {args.out}',
+              file=sys.stderr)
+        return
+
+    if cache_mode == 'resume':
+        # filter out already-cached devices
+        for ip in list(by_ip):
+            by_ip[ip] = [d for d in by_ip[ip]
+                         if d['device_instance'] not in cached_records]
+            if not by_ip[ip]:
+                del by_ip[ip]
+
     total = sum(len(v) for v in by_ip.values())
     print(f'[phase 2] enumerate {total} devices across {len(by_ip)} router IPs, '
           f'{args.workers} workers, names={args.name}', file=sys.stderr)
 
+    if cache_mode == 'full':
+        open_mode = 'w'
+    else:
+        open_mode = 'a'
+
     write_lock = threading.Lock()
     progress = [0, total, time.time()]
-    with open(args.out, 'w') as out_fh:
+    with open(args.out, open_mode) as out_fh:
+        if cache_mode == 'full':
+            meta = {'_meta': True, 'ts': time.time(), 'src_ip': src_ip,
+                    'bcast': bcast, 'window': args.window}
+            out_fh.write(json.dumps(meta) + '\n'); out_fh.flush()
         with ThreadPoolExecutor(max_workers=args.workers) as ex:
             futs = [ex.submit(worker, ip, devs, args, src_ip, write_lock, out_fh, progress)
                     for ip, devs in by_ip.items()]
@@ -186,6 +264,8 @@ def main():
     with open(args.out) as fh:
         for line in fh:
             rec = json.loads(line)
+            if rec.get('_meta'):
+                continue
             total_objs += len([o for o in rec['objects'] if 'type' in o])
             if   rec['status'] == 'ok':                 ok += 1
             elif rec['status'].startswith('partial:'):  partial += 1
