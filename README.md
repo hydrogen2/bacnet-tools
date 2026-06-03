@@ -97,6 +97,27 @@ JSONL record shape:
 
 `status` is `ok`, `partial:N-errors`, `no-reply-count`, or `error-count:<msg>`. Indices that timed out appear in `objects` as `{"index": N, "error": "timeout"}` and can be filled later by `bac_retry.py`.
 
+### `bacwrite_raw.py` — one WriteProperty
+
+```
+bacwrite_raw.py <ip[:port]> <objref> <prop_id>
+    (--real X | --uint N | --enum N | --bool 0/1 | --null | --dopr ...)
+    [--priority 1..16]
+```
+
+WriteProperty for commandable points (priority array slots) and structured properties. `objref` accepts `analog-value:1` style or numeric `2:1`. `--null` releases a priority slot. `--dopr OBJTYPE:INST:PROP[:ARRIDX]` (repeatable) builds a list of `DeviceObjectPropertyReference` values — needed for properties like a `Schedule` object's `list-of-object-property-references`.
+
+```sh
+# Override AV:1 present-value at priority 9
+bacwrite_raw.py 192.168.67.67 analog-value:1 85 --real 23.5 --priority 9
+
+# Release that override
+bacwrite_raw.py 192.168.67.67 analog-value:1 85 --null --priority 9
+
+# Wire Schedule:2's LOPR to drive AV:1's present-value
+bacwrite_raw.py 192.168.67.67 schedule:2 175 --dopr analog-value:1:85
+```
+
 ### `bac_retry.py` — fix timeouts in a previous scan
 
 ```
