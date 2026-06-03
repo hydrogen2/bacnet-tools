@@ -5,8 +5,14 @@ The kernel-bypass pattern used throughout:
     so a colocated BACnet stack (e.g. Cimetrics BACstac) owning UDP/47808
     via bind() does not block our send.
   * RX: SOCK_RAW + IPPROTO_UDP receives a kernel-issued copy of every UDP
-    datagram destined for this host, in parallel with normal UDP demux,
-    so we see replies (and broadcasts) the bound stack also sees.
+    datagram destined to a *unicast* address on this host, in parallel
+    with normal UDP demux, so we see point-to-point replies the bound
+    stack also sees.
+
+Broadcast RX caveat: SOCK_RAW + IPPROTO_UDP does NOT reliably deliver
+datagrams sent to broadcast destinations (the kernel filters them).
+Tools that need to capture broadcast replies (e.g. I-Am-Router-To-Network)
+must use AF_PACKET — see bacrouter_raw.py.
 
 Requires CAP_NET_RAW (run as root or setcap on the interpreter).
 """
@@ -94,16 +100,48 @@ def build_npdu(dnet=None, dadr=None, expecting_reply=True):
         out += struct.pack('>H', dnet) + bytes([len(dadr)]) + dadr + bytes([0xFF])
     return out
 
-def build_whois(low=None, high=None):
+def build_whois(low=None, high=None, dnet=None, dadr=None):
+    """Who-Is request.
+
+    Default (no dnet): global-broadcast NPDU (DNET=0xFFFF) wrapped in
+    BVLC ORIG-BROADCAST — send to the subnet broadcast IP.
+
+    With dnet set: NPDU targets that BACnet network (DNET=dnet, dadr
+    optional for unicast on the remote net) wrapped in BVLC ORIG-UNICAST —
+    send to a router IP that advertises the network.
+    """
     apdu = bytearray([(APDU_UNCONFIRMED_REQUEST << 4), SVC_WHOIS])
     if low is not None and high is not None:
         apdu += _encode_ctx_uint(0, low)
         apdu += _encode_ctx_uint(1, high)
-    # Global broadcast NPDU: DNET=0xFFFF, DLEN=0, hop=0xFF
-    npdu = bytes([0x01, 0x20, 0xFF, 0xFF, 0x00, 0xFF])
+    if dnet is None:
+        npdu = bytes([0x01, 0x20, 0xFF, 0xFF, 0x00, 0xFF])
+        bvlc_func = BVLC_FUNC_ORIG_BROADCAST
+    else:
+        npdu = build_npdu(dnet=dnet, dadr=dadr, expecting_reply=False)
+        bvlc_func = BVLC_FUNC_ORIG_UNICAST
     body = npdu + bytes(apdu)
-    return (bytes([BVLC_TYPE, BVLC_FUNC_ORIG_BROADCAST])
+    return (bytes([BVLC_TYPE, bvlc_func])
             + struct.pack('>H', 4 + len(body)) + body)
+
+def build_whois_router_to_network(dnet=None):
+    """Who-Is-Router-To-Network NLM (Network Layer Message).
+
+    Lives below the APDU layer, so it is unaffected by Tridium-style
+    Who-Is debounce. Routers reply with I-Am-Router-To-Network broadcast
+    on the local network advertising the BACnet network numbers they
+    route to.
+
+    Note: I-Am-Router-To-Network replies are sent to the IP broadcast
+    address. SOCK_RAW + IPPROTO_UDP does NOT reliably deliver UDP
+    datagrams sent to broadcast destinations; use AF_PACKET to capture
+    them (see bacrouter_raw.py).
+    """
+    nlm = bytes([0x01, 0x80, 0x00])
+    if dnet is not None:
+        nlm += struct.pack('>H', dnet)
+    return (bytes([BVLC_TYPE, BVLC_FUNC_ORIG_BROADCAST])
+            + struct.pack('>H', 4 + len(nlm)) + nlm)
 
 def build_readprop(obj_type, obj_inst, prop_id, invoke_id,
                    array_index=None, dnet=None, dadr=None):

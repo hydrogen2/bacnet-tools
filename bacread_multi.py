@@ -106,8 +106,13 @@ def main():
                 out.append({'label': label, 'value': None, 'error': 'timeout'})
             elif isinstance(vals, str):
                 out.append({'label': label, 'value': None, 'error': vals})
-            else:
+            elif not vals:
+                out.append({'label': label, 'value': [], 'type': None})
+            elif len(vals) == 1:
                 out.append({'label': label, 'value': vals[0][1], 'type': vals[0][0]})
+            else:
+                out.append({'label': label, 'value': [v for _, v in vals],
+                            'type': [t for t, _ in vals]})
         print(json.dumps(out, indent=2))
     else:
         for label, vals in results:
@@ -115,8 +120,12 @@ def main():
                 print(f'{label:<20} timeout')
             elif isinstance(vals, str):
                 print(f'{label:<20} {vals}')
-            else:
+            elif not vals:
+                print(f'{label:<20} <empty>')
+            elif len(vals) == 1:
                 print(f'{label:<20} {vals[0][1]}')
+            else:
+                print(f'{label:<20} [{len(vals)}] {", ".join(repr(v) for _, v in vals)}')
 
     ok = sum(1 for _, v in results if v is not None and not isinstance(v, str))
     print(f'\n{ok}/{len(results)} in {elapsed:.2f}s', file=sys.stderr)

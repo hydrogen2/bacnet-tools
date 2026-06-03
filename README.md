@@ -39,9 +39,24 @@ bacread_raw.py 192.168.23.118 8 901 76 --index 0 --dnet 23023 --dadr 17
 
 ```
 bacsearch_raw.py [low high] [--window 5]
+bacsearch_raw.py [low high] --dnet N --router IP   # routed Who-Is
 ```
 
 Sends one Who-Is, collects I-Am replies for `--window` seconds, prints `{device_instance, ip, port, max_apdu, segmentation, vendor_id}` plus `snet/sadr` for routed devices. Step 1 of autosearch — yields a directory of every reachable device.
+
+`--dnet N --router IP` switches to routed Who-Is: NPDU carries DNET=N, BVLC is unicast to the router IP, and the router broadcasts on the remote BACnet network. Use after `bacrouter_raw.py` discovers a router. `--dadr HEX` narrows to a unicast MAC on the remote network.
+
+### `bacrouter_raw.py` — Who-Is-Router-To-Network probe
+
+```
+bacrouter_raw.py [--dnet N] [--window 6]
+```
+
+Sends a Who-Is-Router-To-Network NLM (Network Layer Message); collects `I-Am-Router-To-Network` replies and prints each router's IP plus the BACnet network numbers it routes to. With `--dnet N`, asks only about routes to network N.
+
+Lives below the APDU layer, so it is **not affected by Tridium-style Who-Is debounce** which suppresses Unconfirmed-Request Who-Is at the APDU layer. Useful when `bacsearch_raw.py` returns nothing after a burst of probes.
+
+Receives via `AF_PACKET` (Linux) because I-Am-Router-To-Network replies are broadcast, and the `SOCK_RAW + IPPROTO_UDP` pattern used elsewhere in this toolkit does not reliably deliver broadcast-destination UDP datagrams.
 
 ### `bacenum_raw.py` — walk one device's object-list
 
