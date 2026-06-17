@@ -36,6 +36,7 @@ touch /etc/default/tailscaled
 mkdir -p /etc/systemd/system/tailscaled.service.d
 cat > /etc/systemd/system/tailscaled.service.d/userspace.conf <<'EOF'
 [Service]
+Type=simple
 ExecStart=
 ExecStart=/usr/sbin/tailscaled --tun=userspace-networking --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock
 EOF
