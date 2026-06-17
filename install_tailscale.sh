@@ -27,6 +27,11 @@ if ! command -v tailscale >/dev/null 2>&1; then
     rm -rf "/tmp/tailscale_${TS_VER}_${TS_ARCH}"
 fi
 
+# Ensure runtime dirs and env file exist (some systemd versions
+# fail to auto-create RuntimeDirectory/StateDirectory)
+mkdir -p /run/tailscale /var/lib/tailscale /var/cache/tailscale
+touch /etc/default/tailscaled
+
 # Override systemd unit for userspace networking
 mkdir -p /etc/systemd/system/tailscaled.service.d
 cat > /etc/systemd/system/tailscaled.service.d/userspace.conf <<'EOF'
