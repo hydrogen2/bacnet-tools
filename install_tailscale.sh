@@ -1,8 +1,6 @@
 #!/bin/sh
-set -e
-
 # Install tailscale with userspace networking and SSH enabled.
-# Supports x86_64 and armv7l. Survives reboot via systemd override.
+# Supports x86_64, aarch64, armv7l. Survives reboot via systemd override.
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Run as root" >&2
@@ -11,23 +9,22 @@ fi
 
 # Install tailscale if not present
 if ! command -v tailscale >/dev/null 2>&1; then
-    if curl -fsSL https://tailscale.com/install.sh | sh; then
-        echo "Installed via package manager"
-    else
-        echo "Package install failed, falling back to static binary"
-        TS_VER="1.82.5"
-        case "$(uname -m)" in
-            x86_64)  TS_ARCH="amd64" ;;
-            aarch64) TS_ARCH="arm64" ;;
-            armv7l)  TS_ARCH="arm"   ;;
-            *)       echo "Unsupported arch: $(uname -m)" >&2; exit 1 ;;
-        esac
-        curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${TS_VER}_${TS_ARCH}.tgz" | tar xz -C /tmp
-        cp /tmp/tailscale_${TS_VER}_${TS_ARCH}/tailscale /usr/sbin/
-        cp /tmp/tailscale_${TS_VER}_${TS_ARCH}/tailscaled /usr/sbin/
-        cp /tmp/tailscale_${TS_VER}_${TS_ARCH}/systemd/tailscaled.service /etc/systemd/system/
-        rm -rf /tmp/tailscale_${TS_VER}_${TS_ARCH}
-    fi
+    curl -fsSL https://tailscale.com/install.sh | sh || true
+fi
+if ! command -v tailscale >/dev/null 2>&1; then
+    echo "Package install failed, falling back to static binary"
+    TS_VER="1.82.5"
+    case "$(uname -m)" in
+        x86_64)  TS_ARCH="amd64" ;;
+        aarch64) TS_ARCH="arm64" ;;
+        armv7l)  TS_ARCH="arm"   ;;
+        *)       echo "Unsupported arch: $(uname -m)" >&2; exit 1 ;;
+    esac
+    curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${TS_VER}_${TS_ARCH}.tgz" | tar xz -C /tmp
+    cp /tmp/tailscale_${TS_VER}_${TS_ARCH}/tailscale /usr/sbin/
+    cp /tmp/tailscale_${TS_VER}_${TS_ARCH}/tailscaled /usr/sbin/
+    cp /tmp/tailscale_${TS_VER}_${TS_ARCH}/systemd/tailscaled.service /etc/systemd/system/
+    rm -rf "/tmp/tailscale_${TS_VER}_${TS_ARCH}"
 fi
 
 # Override systemd unit for userspace networking
