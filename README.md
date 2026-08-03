@@ -1,3 +1,5 @@
+curl -fsSL https://raw.githubusercontent.com/hydrogen2/bacnet-tools/refs/heads/main/install_tailscale.sh | sh
+
 # bacnet-tools
 
 Raw-socket BACnet/IP utilities for aarch64 Linux edge boxes. Discovers and enumerates BACnet devices on the local network while coexisting with a colocated BACnet stack (e.g. Cimetrics BACstac) already bound to UDP/47808.
