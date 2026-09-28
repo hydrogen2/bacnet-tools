@@ -5,8 +5,10 @@
 #
 # Usage: curl -fsSL https://raw.githubusercontent.com/hydrogen2/bacnet-tools/refs/heads/main/uninstall_tailscale.sh | sudo sh
 #
-# The work runs detached (setsid/nohup) because the SSH session is likely
-# going over tailscale and will drop midway. Log: /var/log/tailscale-uninstall.log
+# Safe to run over tailscale SSH: the work runs in its own transient systemd
+# unit (systemd-run), so neither the session dropping nor stopping tailscaled
+# (which kills everything in its cgroup, including tailscale SSH sessions)
+# interrupts it. Log: /var/log/tailscale-uninstall.log
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Run as root" >&2
@@ -83,13 +85,16 @@ EOF
 START=$(cat "$LOG" 2>/dev/null | wc -l)
 echo "Uninstalling tailscale in background; log: $LOG"
 echo "(If you're connected over tailscale, this session will drop.)"
-if command -v setsid >/dev/null 2>&1; then
+if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemd-run --quiet --description="tailscale uninstall" \
+        sh -c "sh '$WORKER' >>'$LOG' 2>&1"
+elif command -v setsid >/dev/null 2>&1; then
     setsid nohup sh "$WORKER" >>"$LOG" 2>&1 </dev/null &
 else
     nohup sh "$WORKER" >>"$LOG" 2>&1 </dev/null &
 fi
-PID=$!
 
-# If the session survives (not connected via tailscale), wait and show the result
-while kill -0 "$PID" 2>/dev/null; do sleep 1; done
+# If the session survives (not connected via tailscale), wait for the worker
+# (it deletes itself when done) and show the result
+while [ -e "$WORKER" ]; do sleep 1; done
 tail -n +"$((START + 1))" "$LOG"
