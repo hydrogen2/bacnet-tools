@@ -65,9 +65,13 @@ fi
 rm -rf \
     /usr/sbin/tailscale /usr/sbin/tailscaled \
     /usr/bin/tailscale /usr/bin/tailscaled \
+    /usr/local/bin/tailscale /usr/local/bin/tailscaled \
+    /usr/local/sbin/tailscale /usr/local/sbin/tailscaled \
     /etc/systemd/system/tailscaled.service \
     /etc/systemd/system/tailscaled.service.d \
     /etc/systemd/system/multi-user.target.wants/tailscaled.service \
+    /lib/systemd/system/tailscaled.service \
+    /usr/local/lib/systemd/system/tailscaled.service \
     /etc/default/tailscaled \
     /var/lib/tailscale /var/cache/tailscale /run/tailscale \
     /etc/apt/sources.list.d/tailscale.list \
