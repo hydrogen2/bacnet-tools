@@ -8,7 +8,12 @@
 # Safe to run over tailscale SSH: the work runs in its own transient systemd
 # unit (systemd-run), so neither the session dropping nor stopping tailscaled
 # (which kills everything in its cgroup, including tailscale SSH sessions)
-# interrupts it. Log: /var/log/tailscale-uninstall.log
+# interrupts it.
+#
+# On a clean uninstall the log (/var/log/tailscale-uninstall.log) deletes
+# itself, leaving no artifact from this script; it is kept only if something
+# failed, so there is a record to debug. (The journal, apt/dpkg logs and shell
+# history still record that tailscale was installed; those are not touched.)
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Run as root" >&2
@@ -20,6 +25,8 @@ WORKER=$(mktemp /tmp/tailscale-uninstall.XXXXXX) || exit 1
 
 cat > "$WORKER" <<'EOF'
 #!/bin/sh
+# $1 = log path (deleted on a clean run, kept on failure)
+LOGPATH=$1
 echo "=== tailscale uninstall started $(date) ==="
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -72,29 +79,44 @@ if have systemctl; then
     systemctl reset-failed tailscaled 2>/dev/null
 fi
 
+# Verify nothing tailscale-related is left behind
 LEFT=$(ls /usr/sbin/tailscale* /usr/bin/tailscale* /usr/local/bin/tailscale* /usr/local/sbin/tailscale* 2>/dev/null)
-if [ -n "$LEFT" ]; then
-    echo "WARNING: tailscale binaries still present:" $LEFT
+PKG=""
+have dpkg && dpkg -s tailscale >/dev/null 2>&1 && PKG="deb"
+have rpm && rpm -q tailscale >/dev/null 2>&1 && PKG="rpm"
+have apk && apk info -e tailscale >/dev/null 2>&1 && PKG="apk"
+
+if [ -n "$LEFT" ] || [ -n "$PKG" ]; then
+    echo "WARNING: tailscale not fully removed (binaries: ${LEFT:-none}; package: ${PKG:-none})"
+    echo "=== tailscale uninstall finished with errors $(date) ==="
+    echo "Log kept at $LOGPATH for debugging."
 else
     echo "tailscale removed"
+    echo "=== tailscale uninstall finished $(date) ==="
+    # Clean run: remove this script and its own log so no artifact remains.
+    rm -f "$0"
+    [ -n "$LOGPATH" ] && rm -f "$LOGPATH"
+    exit 0
 fi
-echo "=== tailscale uninstall finished $(date) ==="
 rm -f "$0"
 EOF
 
-START=$(cat "$LOG" 2>/dev/null | wc -l)
-echo "Uninstalling tailscale in background; log: $LOG"
-echo "(If you're connected over tailscale, this session will drop.)"
+echo "Uninstalling tailscale in background."
+echo "(If you're connected over tailscale, this session will drop; that's expected.)"
 if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
     systemd-run --quiet --description="tailscale uninstall" \
-        sh -c "sh '$WORKER' >>'$LOG' 2>&1"
+        sh -c "sh '$WORKER' '$LOG' >'$LOG' 2>&1"
 elif command -v setsid >/dev/null 2>&1; then
-    setsid nohup sh "$WORKER" >>"$LOG" 2>&1 </dev/null &
+    setsid nohup sh "$WORKER" "$LOG" >"$LOG" 2>&1 </dev/null &
 else
-    nohup sh "$WORKER" >>"$LOG" 2>&1 </dev/null &
+    nohup sh "$WORKER" "$LOG" >"$LOG" 2>&1 </dev/null &
 fi
 
 # If the session survives (not connected via tailscale), wait for the worker
-# (it deletes itself when done) and show the result
+# (it deletes itself when done) and report. On a clean run the log is gone.
 while [ -e "$WORKER" ]; do sleep 1; done
-tail -n +"$((START + 1))" "$LOG"
+if [ -e "$LOG" ]; then
+    cat "$LOG"
+else
+    echo "tailscale removed cleanly; no log kept."
+fi
