@@ -129,7 +129,8 @@ def encode_app_null():
 def encode_app_bool(b):
     return bytes([0x11 if b else 0x10])
 
-def build_writeprop(obj_type, obj_inst, prop_id, value_bytes, invoke_id, priority=None):
+def build_writeprop(obj_type, obj_inst, prop_id, value_bytes, invoke_id, priority=None,
+                    dnet=None, dadr=None):
     apdu = bytearray([0x00, 0x05, invoke_id & 0xFF, SVC_WRITE_PROPERTY])
     # [0] objectIdentifier
     apdu += encode_ctx_oid(0, obj_type, obj_inst)
@@ -141,7 +142,7 @@ def build_writeprop(obj_type, obj_inst, prop_id, value_bytes, invoke_id, priorit
     apdu += bytes([0x3F])           # close ctx[3]
     if priority is not None:
         apdu += encode_ctx_uint(4, priority)
-    npdu = build_npdu(expecting_reply=True)
+    npdu = build_npdu(dnet=dnet, dadr=dadr, expecting_reply=True)
     body = npdu + bytes(apdu)
     return (bytes([BVLC_TYPE, BVLC_FUNC_ORIG_UNICAST])
             + struct.pack('>H', 4 + len(body)) + body)
@@ -197,6 +198,11 @@ def main():
     ap.add_argument('--null', action='store_true', help='Write Null (release priority slot).')
     ap.add_argument('--priority', type=int, default=None,
                     help='BACnet priority (1..16) for commandable writes.')
+    ap.add_argument('--dnet', type=int, default=None,
+                    help='Destination BACnet network for a ROUTED device. Address the '
+                         'packet to the ROUTER ip and give the device network here.')
+    ap.add_argument('--dadr', default=None,
+                    help="Destination MAC on --dnet, hex (e.g. '8004a801bac0').")
     ap.add_argument('--timeout', type=float, default=5.0)
     ap.add_argument('--src-ip', default=None)
     ap.add_argument('--src-port', type=int, default=BAC_PORT)
@@ -233,11 +239,14 @@ def main():
         print('error: provide one of --dopr / --real / --uint / --enum / --bool / --null', file=sys.stderr)
         sys.exit(2)
 
+    dadr = bytes.fromhex(args.dadr) if args.dadr else None
+
     r = Reader(src_ip, args.src_port, args.timeout)
     try:
         invoke_id = random.randint(1, 254)
         pkt = build_writeprop(obj_type, obj_inst, args.prop_id, value_bytes,
-                              invoke_id, priority=args.priority)
+                              invoke_id, priority=args.priority,
+                              dnet=args.dnet, dadr=dadr)
         print(f'-> WriteProperty {args.objref} prop={args.prop_id} priority={args.priority} '
               f'value_bytes={value_bytes.hex()} apdu_size={len(pkt)}')
         apdu = send_and_wait(r, dst_ip, dst_port, pkt, invoke_id, args.timeout)
