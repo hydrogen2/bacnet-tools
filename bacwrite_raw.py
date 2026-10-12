@@ -57,6 +57,24 @@ def encode_app_uint(n):
             m >>= 8
     return bytes([0x20 | len(b)]) + b
 
+def encode_app_enum(n):
+    """Application-tagged Enumerated (tag 9).
+
+    Note the application form is 0x9X; encode_ctx_enum() sets the context class
+    bit (0x08) and yields 0x9{8|9|...}, which a gateway rejects as invalid-tag.
+    BACnetBinaryPV (a binary object's Present_Value) is an ENUMERATED, so writing
+    one needs this, not the context encoder.
+    """
+    if n == 0:
+        b = b'\x00'
+    else:
+        b = b''
+        m = n
+        while m > 0:
+            b = bytes([m & 0xFF]) + b
+            m >>= 8
+    return bytes([0x90 | len(b)]) + b
+
 def encode_ctx_uint(tag, n):
     """Context-tagged Unsigned."""
     if n == 0:
@@ -206,7 +224,7 @@ def main():
     elif args.uint is not None:
         value_bytes = encode_app_uint(args.uint)
     elif args.enum is not None:
-        value_bytes = encode_ctx_enum(9, args.enum)  # app-tag enumerated = 0x91 etc
+        value_bytes = encode_app_enum(args.enum)
     elif args.boolean is not None:
         value_bytes = encode_app_bool(args.boolean)
     elif args.null:
