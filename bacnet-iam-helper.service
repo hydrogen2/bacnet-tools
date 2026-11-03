@@ -1,0 +1,24 @@
+[Unit]
+Description=BACnet forged I-Am helper (devices that answer ReadProperty but ignore Who-Is)
+Documentation=file:/root/bacnet-tools/iam_watch.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/root/bacnet-tools
+ExecStart=/usr/bin/python3 /root/bacnet-tools/iam_watch.py
+Restart=always
+RestartSec=15
+# Needs CAP_NET_RAW for the raw sockets that coexist with BACstac on 47808.
+User=root
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bacnet-iam
+
+[Install]
+WantedBy=multi-user.target

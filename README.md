@@ -128,6 +128,42 @@ bac_retry.py --in scan.jsonl --out scan.jsonl --timeout 6
 
 Reads only `status=partial:*` records, re-reads exactly the `array_index` slots that failed (not the whole object-list), updates `status` to `ok` when gaps fill. Much cheaper than re-running `bacscan_raw.py`; typically closes every gap with a longer timeout on the first try.
 
+### `fake_iam.py` — unblock a device that ignores Who-Is
+
+```
+# read the real fields off the device first (ReadProperty works; Who-Is does not)
+bacread_multi.py 10.138.0.193 8:702193:75 8:702193:62 8:702193:107 8:702193:120
+
+fake_iam.py --dev-ip 10.138.0.193 --inst 702193 \
+    --max-apdu 1476 --seg 0 --vendor 246 --stack-ip 10.130.1.196
+```
+
+Some old firmware never answers Who-Is — not even unicast — while answering unicast ReadProperty perfectly. BACstac will not route a single request until `bsResolveDeviceID` completes, so the colocated `bacstac_client` collect wedges forever on `devInst(N) ResolveDeviceID failed, status=Device unreachable` even though the device is healthy. This injects an I-Am on the device's behalf.
+
+Two things decide whether it works, both documented at length in the script's header:
+
+- **Source address.** BACstac binds the instance to the packet's source, not the I-Am payload, so the I-Am must be forged *from the device's* IP — otherwise the handshake passes and every subsequent read goes to the helper.
+- **Field accuracy.** BACstac believes the advertised `max-apdu-length-accepted` and `segmentation-supported`. Guess them high and you trade a clean handshake failure for intermittent silent drops. Read them off the device; if unreadable, fall back to the BACnet floor (480, no segmentation).
+
+If the device answers a *unicast* Who-Is but not a broadcast one, this is the wrong tool — that is a broadcast-reception problem, and redirecting the edge's own broadcast with nftables keeps the I-Am genuine.
+
+### `iam_watch.py` + `bacnet-iam-helper.service` — keep it unblocked
+
+```
+cp iam_watch.py fake_iam.py bacnet_wire.py /root/bacnet-tools/
+install -m 0644 bacnet-iam-helper.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now bacnet-iam-helper
+tail -f /var/log/bacnet-iam.log
+```
+
+One I-Am is enough — BACstac caches the binding and does not re-resolve while the device keeps answering (measured: still 1536 points/min 2.5 min after the sender stopped). So this is **event-driven, not periodic**: it watches the driver logs for the `ResolveDeviceID failed` line and fires once. The only three things that lose a binding — edge reboot, `edge-dpf`/BACstac restart, collect republish — all surface as that same line.
+
+Generic by design: device IP and port come from the driver log directory name, the instance from the log line, so a future silent device needs no configuration.
+
+**It verifies the device is alive with a unicast ReadProperty before forging anything, and sends nothing if that fails.** Without that guard a genuinely dead controller would be handed a fake binding and the collect would report read errors forever instead of a clean "unreachable" — trading a visible fault for an invisible one. Keep it.
+
+Run `iam_watch.py --once --log-dir <synthetic dir>` to exercise the detect/guard/forge paths without waiting for a real failure.
+
 ## Typical workflow
 
 ```sh
