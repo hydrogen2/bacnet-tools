@@ -66,17 +66,23 @@ Receives via `AF_PACKET` (Linux) because I-Am-Router-To-Network replies are broa
 bacenum_raw.py <ip[:port]> <device_instance> [--dnet N --dadr HEX] [--name] [--limit N]
 ```
 
-Reads `object-list[0]` for the count, then iterates indices `1..N` one at a time. Universal — works on `segmentation=none` devices with `max_apdu=480`. With `--name`, also reads `object-name` (property 77) for each object.
+Reads `object-list[0]` for the count, then iterates indices `1..N` one at a time. Universal — works on `segmentation=none` devices with `max_apdu=480`. With `--name`, also reads `object-name` (property 77) for each object. (`bacscan_raw.py --name` reads `description` too — see below.)
 
 ### `bacscan_raw.py` — full autosearch
 
 ```
-bacscan_raw.py [--name] [--workers 16] [--timeout 5] [--out /tmp/bac_autosearch.jsonl]
+bacscan_raw.py [--name] [--no-desc] [--workers 16] [--timeout 5] [--out /tmp/bac_autosearch.jsonl]
 ```
 
 - **Phase 1**: Who-Is, build device directory.
 - **Phase 2**: one worker thread per router IP. Devices on the same router serialize (MS/TP is a single token-ring; parallel just queues and times out); different routers run concurrently up to `--workers`.
 - **Output**: JSONL, one device per line, flushed after each device — crash-safe.
+- **`--name` reads BOTH `Object_Name` (77) and `Description` (28)** into `name` and
+  `desc`. Read both: on many gateways `Object_Name` is a placeholder and the point's
+  real role is only in `Description`. A Synapsys SIP+ publishes `binary value 3` as the
+  name and `Filter Sign` as the description — a scan that keeps only the name loses the
+  entire point vocabulary and leaves the mapping unrecoverable from the wire. Pass
+  `--no-desc` to skip it and halve the per-object reads.
 
 JSONL record shape:
 

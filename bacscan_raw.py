@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bacnet_wire import (
     Reader, build_ip_udp, build_whois, extract_apdu, parse_iam,
     parse_readprop_ack,
-    BAC_PORT, OBJ_DEVICE, PROP_OBJECT_LIST, PROP_OBJECT_NAME,
+    BAC_PORT, OBJ_DEVICE, PROP_OBJECT_LIST, PROP_OBJECT_NAME, PROP_DESCRIPTION,
     resolve_src_and_bcast,
 )
 
@@ -54,7 +54,20 @@ def discover(src_ip, src_port, bcast_ip, bcast_port, window):
         except OSError: pass
     return devices
 
-def enumerate_device(reader, dev, want_names, rate):
+def read_string_prop(reader, ip, port, ot, oi, prop, dnet, dadr):
+    """ReadProperty one CharacterString property; None on any failure."""
+    apdu = reader.read(ip, port, ot, oi, prop, dnet=dnet, dadr=dadr)
+    if apdu is None:
+        return None
+    try:
+        vals = parse_readprop_ack(apdu)
+    except RuntimeError:
+        return None
+    if vals and vals[0][0] == 'string':
+        return vals[0][1]
+    return None
+
+def enumerate_device(reader, dev, want_names, rate, want_desc=True):
     inst, ip, port = dev['device_instance'], dev['ip'], dev['port']
     dnet, dadr = dev['snet'], dev['sadr']
     base = {'device': inst, 'ip': ip, 'port': port, 'snet': dnet,
@@ -90,18 +103,20 @@ def enumerate_device(reader, dev, want_names, rate):
         if not vals or vals[0][0] != 'oid':
             errs += 1; objs.append({'index': i, 'error': f'unexpected:{vals!r}'}); continue
         ot, oi = vals[0][1]
-        name = None
+        name = desc = None
         if want_names:
             time.sleep(rate)
-            apdu2 = reader.read(ip, port, ot, oi, PROP_OBJECT_NAME, dnet=dnet, dadr=dadr)
-            if apdu2 is not None:
-                try:
-                    v2 = parse_readprop_ack(apdu2)
-                    if v2 and v2[0][0] == 'string':
-                        name = v2[0][1]
-                except RuntimeError:
-                    pass
-        objs.append({'type': ot, 'instance': oi, 'name': name})
+            name = read_string_prop(reader, ip, port, ot, oi,
+                                    PROP_OBJECT_NAME, dnet, dadr)
+            # Object_Name is a placeholder on many gateways (Synapsys publishes
+            # 'binary value 3'); the point's real role is in Description. Read
+            # both — losing Description makes a mapping unrecoverable from the
+            # wire. (Bolton Wanderers, 2026-11-05.)
+            if want_desc:
+                time.sleep(rate)
+                desc = read_string_prop(reader, ip, port, ot, oi,
+                                        PROP_DESCRIPTION, dnet, dadr)
+        objs.append({'type': ot, 'instance': oi, 'name': name, 'desc': desc})
 
     return {**base,
             'status': 'ok' if errs == 0 else f'partial:{errs}-errors',
@@ -135,7 +150,8 @@ def worker(ip, devs_for_ip, args, src_ip, write_lock, out_fh, progress):
     reader = Reader(src_ip, args.src_port, args.timeout)
     try:
         for dev in devs_for_ip:
-            res = enumerate_device(reader, dev, args.name, args.rate)
+            res = enumerate_device(reader, dev, args.name, args.rate,
+                                   want_desc=not args.no_desc)
             with write_lock:
                 out_fh.write(json.dumps(res) + '\n'); out_fh.flush()
                 progress[0] += 1
@@ -159,7 +175,10 @@ def main():
     ap.add_argument('--bcast-port', type=int, default=BAC_PORT)
     ap.add_argument('--window',     type=float, default=8.0)
     ap.add_argument('--workers',    type=int, default=16)
-    ap.add_argument('--name',       action='store_true')
+    ap.add_argument('--name',       action='store_true',
+                    help='read Object_Name and Description for every object')
+    ap.add_argument('--no-desc',    action='store_true',
+                    help='with --name, skip Description (halves the per-object reads)')
     ap.add_argument('--rate',       type=float, default=0.03)
     ap.add_argument('--timeout',    type=float, default=5.0)
     ap.add_argument('--out',        default='/tmp/bac_autosearch.jsonl')
@@ -237,7 +256,8 @@ def main():
 
     total = sum(len(v) for v in by_ip.values())
     print(f'[phase 2] enumerate {total} devices across {len(by_ip)} router IPs, '
-          f'{args.workers} workers, names={args.name}', file=sys.stderr)
+          f'{args.workers} workers, names={args.name}, '
+          f'desc={args.name and not args.no_desc}', file=sys.stderr)
 
     if cache_mode == 'full':
         open_mode = 'w'

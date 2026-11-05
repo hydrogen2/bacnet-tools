@@ -41,6 +41,7 @@ SVC_WHOIS                = 0x08  # unconfirmed service 8
 
 PROP_OBJECT_LIST = 76
 PROP_OBJECT_NAME = 77
+PROP_DESCRIPTION = 28
 
 OBJ_DEVICE = 8
 
