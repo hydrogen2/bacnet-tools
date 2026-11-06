@@ -36,6 +36,12 @@ OBJ_TYPES = {
     'multistate-value': 19, 'trend-log': 20,
 }
 
+# BACnet itself, bacread_multi.py and the EnOS `objectId` field all spell these
+# 'multi-state-...'; accept both spellings so a name copied from a mapping or a
+# scan just works. ('multi-state-value:4' threw KeyError at Bolton, 2026-11-06.)
+OBJ_TYPES.update({k.replace('multistate-', 'multi-state-'): v
+                  for k, v in OBJ_TYPES.items() if k.startswith('multistate-')})
+
 def parse_objref(s):
     """Accept 'analog-value:1' or '2:1' (numeric type)."""
     name, inst = s.rsplit(':', 1)
